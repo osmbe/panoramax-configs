@@ -1,3 +1,3 @@
 [submodule "secrets"]
 	path = secrets
-	url = git@github.com:thibaultmol/secrets-test-osmbe-panoramax.git
+	url = git@github.com:osmbe/panoramax-secrets.git
