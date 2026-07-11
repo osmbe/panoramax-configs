@@ -2,7 +2,7 @@
 
 This doc gives you the step by step plan on what needs to be done to setup a Panoramax instance, some things here are specific to our setup so might need to be changed for your instance.
 The other docs are [`OPERATIONS.md`](./OPERATIONS.md) which is where you'll find various things related to actually maintaining and debugging the instance;
-And there is also the [`spec.md`](./spec.md) doc which tries to give an overview of the whole setup and why certain things are implemented the way they are.
+And there is also the [`SPEC.md`](./SPEC.md) doc which tries to give an overview of the whole setup and why certain things are implemented the way they are.
 
 **Order matters.** Each step builds on the previous ones, so if something breaks, fix it before moving on.
 
@@ -10,7 +10,7 @@ And there is also the [`spec.md`](./spec.md) doc which tries to give an overview
 
 ## Step 0 - Read first
 
-- [x] Skim [`spec.md`](./spec.md) (and maybe [`OPERATIONS.md`](./OPERATIONS.md) too, though you can probably skip it for now). Make sure the design choices actually fit what you want (stuff like the SSH port, schedule timings, and monitoring target).
+- [x] Skim [`SPEC.md`](./SPEC.md) (and maybe [`OPERATIONS.md`](./OPERATIONS.md) too, though you can probably skip it for now). Make sure the design choices actually fit what you want (stuff like the SSH port, schedule timings, and monitoring target).
 
 ---
 
@@ -35,7 +35,7 @@ Here's what you need on your dev machine:
 
 ### 1.2 Repos + secrets bootstrap
 
-We've split things across two repos: the **public** `panoramax-configs` repo (this one) has the Nix configs, compose files, and docs; the **private** `panoramax-secrets` repo holds the encrypted sops file. That private repo is wired into `./secrets/` as a git submodule. See [`spec.md` § Secrets](./spec.md#secrets) if you want to know why we did it this way.
+We've split things across two repos: the **public** `panoramax-configs` repo (this one) has the Nix configs, compose files, and docs; the **private** `panoramax-secrets` repo holds the encrypted sops file. That private repo is wired into `./secrets/` as a git submodule. See [`SPEC.md` § Secrets](./SPEC.md#secrets) if you want to know why we did it this way.
 
 - [x] **Fork (or clone) the public repo and point `origin` at your own fork.** The auto-upgrade timer just pushes to whatever `origin` points to. If you leave it on upstream it'll either fail (because you don't have write access) or accidentally push your config changes to upstream.
 
@@ -145,7 +145,7 @@ This step creates **three keys**. Each section below tells you what the key is, 
 
   > **Heads-up:** for this key to actually work, the public repo on the VPS needs to be cloned using the **SSH URL form** (`git@github.com:<org>/panoramax-configs.git`), not HTTPS. The auto-upgrade unit sets `GIT_SSH_COMMAND` to use this deploy key, but `GIT_SSH_COMMAND` only works with SSH-protocol remotes. An HTTPS `origin` would just silently bypass the deploy key and the push would fail. Step 2.5 reminds you about this when you clone.
 
-> **No key for the private secrets repo, and that's on purpose.** This deploy key is only for the public repo (auto-upgrade pushes `flake.lock` bumps to `prod`). The VPS never keeps a permanent credential for the private secrets repo; Instead, any time you need to make a change to the secrets, you just connect to the vps using **SSH agent forwarding** every time you SSH in: `ssh -A -p <port> panoramax@<vps>`. Your laptop's sops and GitHub key are used for the duration of that session, and nothing sticks around afterwards. See `spec.md` § Secrets, and step 2.5 below.
+> **No key for the private secrets repo, and that's on purpose.** This deploy key is only for the public repo (auto-upgrade pushes `flake.lock` bumps to `prod`). The VPS never keeps a permanent credential for the private secrets repo; Instead, any time you need to make a change to the secrets, you just connect to the vps using **SSH agent forwarding** every time you SSH in: `ssh -A -p <port> panoramax@<vps>`. Your laptop's sops and GitHub key are used for the duration of that session, and nothing sticks around afterwards. See `SPEC.md` § Secrets, and step 2.5 below.
 
 - [x] Now that you've got both age pubkeys (yours + the host's), commit `secrets/.sops.yaml` to the **private** secrets repo so that future `sops` calls use the right recipients:
 
@@ -276,7 +276,7 @@ s3cmd -c <your-s3cfg> setlifecycle /tmp/lifecycle.xml s3://panoramax-osmbe-backu
 
 ### 1.10 Monitoring (Grafana Cloud)
 
-Metrics and dashboards live in **Grafana Cloud**; logs get shipped to **Grafana Cloud Loki** (free tier) over public TLS with basic auth (Grafana Cloud expects User ID + access-policy token, not bearer), so log access survives even when the VPS is down. See `spec.md` § Monitoring for why we set it up this way.
+Metrics and dashboards live in **Grafana Cloud**; logs get shipped to **Grafana Cloud Loki** (free tier) over public TLS with basic auth (Grafana Cloud expects User ID + access-policy token, not bearer), so log access survives even when the VPS is down. See `SPEC.md` § Monitoring for why we set it up this way.
 
 **Loki (logs)**
 

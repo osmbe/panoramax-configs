@@ -4,7 +4,7 @@
 # repo: only the gitlink SHA is recorded here, never the encrypted-file bytes.
 # The Nix flake source-resolution sees submodule contents (so the real sops
 # file is visible at flake-eval time once the submodule is initialised — not
-# the case for gitignored paths). See spec.md § Secrets for the rationale.
+# the case for gitignored paths). See SPEC.md § Secrets for the rationale.
 
 # locally-generated host SSH key, etc.
 keys/

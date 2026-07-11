@@ -6,7 +6,7 @@ The flake configures a single Infomaniak VPS to host the Panoramax API, workers,
 
 ## Documentation
 
-- [`spec.md`](./spec.md) — architecture and the *why* behind each design decision.
+- [`SPEC.md`](./SPEC.md) — architecture and the *why* behind each design decision.
 - [`DEPLOY.md`](./DEPLOY.md) — step-by-step initial install with runnable commands.
 - [`OPERATIONS.md`](./OPERATIONS.md) — making changes after deploy: config, secret rotation, admin onboarding, recovery.
 - [`todo.md`](./todo.md) — deferred items.
@@ -18,7 +18,7 @@ The flake configures a single Infomaniak VPS to host the Panoramax API, workers,
 
 ## Invariant
 
-`nix flake check` must pass on a fresh clone of this repo, with **no secrets initialised**. A plaintext `secrets-dummy.yaml` handles fallback; real secrets live in a separate private repository (`panoramax-secrets`) attached to `./secrets/` as a git submodule. See [`spec.md` § Secrets](./spec.md#secrets).
+`nix flake check` must pass on a fresh clone of this repo, with **no secrets initialised**. A plaintext `secrets-dummy.yaml` handles fallback; real secrets live in a separate private repository (`panoramax-secrets`) attached to `./secrets/` as a git submodule. See [`SPEC.md` § Secrets](./SPEC.md#secrets).
 
 ```bash
 # Fresh clone WITHOUT the secrets submodule — verifies the dummy fallback path:

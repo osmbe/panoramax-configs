@@ -1,6 +1,6 @@
 # OPERATIONS — post-install changes and maintenance
 
-For initial install see [`DEPLOY.md`](./DEPLOY.md). For *why* the system is shaped this way see [`spec.md`](./spec.md). For env-vars and `panoramax_backend` CLI surface see the [upstream Panoramax docs](https://docs.panoramax.fr).
+For initial install see [`DEPLOY.md`](./DEPLOY.md). For *why* the system is shaped this way see [`SPEC.md`](./SPEC.md). For env-vars and `panoramax_backend` CLI surface see the [upstream Panoramax docs](https://docs.panoramax.fr).
 
 ## Two kinds of changes
 
@@ -82,7 +82,7 @@ $ ssh-add -l             # should list the key
 $ git pull --ff-only
 ```
 
-`?submodules=1` is required on every `nixos-rebuild` because the encrypted secrets file lives in the `secrets/` submodule. Without it, the build resolves to `secrets-dummy.yaml` and the stack would start with placeholder credentials — see [`spec.md` § Secrets](./spec.md#secrets) for why.
+`?submodules=1` is required on every `nixos-rebuild` because the encrypted secrets file lives in the `secrets/` submodule. Without it, the build resolves to `secrets-dummy.yaml` and the stack would start with placeholder credentials — see [`SPEC.md` § Secrets](./SPEC.md#secrets) for why.
 
 ## Branch workflows
 
@@ -100,7 +100,7 @@ sudo nixos-rebuild switch --flake '.?submodules=1#panoramax-osmbe'
 
 ## Secret rotation
 
-The VPS does **not** auto-pull the private secrets repo (deliberate — see [`spec.md` § Secrets](./spec.md#secrets)). The submodule pin is updated manually with agent forwarding.
+The VPS does **not** auto-pull the private secrets repo (deliberate — see [`SPEC.md` § Secrets](./SPEC.md#secrets)). The submodule pin is updated manually with agent forwarding.
 
 ```bash
 # on PC — edit, commit, and push to the private repo:
@@ -189,7 +189,7 @@ Host panoramax-vps
 
 Then `ssh -N panoramax-vps` opens the tunnel; clients point at `localhost:5433`. Most GUI clients also support a built-in "connect via SSH tunnel" option — that works too and avoids needing the `LocalForward` line.
 
-**Why not direct over NetBird?** Earlier iterations bound Postgres to the VPS NetBird IP and added admin laptops as peers. That worked but put every admin's machine on a shared mesh, where any co-admin with NetBird dashboard admin (which they need to manage other peers) could route to other admins' machines. Tunnelling over SSH keeps admin laptops off the mesh entirely. See [`spec.md` § NetBird](./spec.md#netbird).
+**Why not direct over NetBird?** Earlier iterations bound Postgres to the VPS NetBird IP and added admin laptops as peers. That worked but put every admin's machine on a shared mesh, where any co-admin with NetBird dashboard admin (which they need to manage other peers) could route to other admins' machines. Tunnelling over SSH keeps admin laptops off the mesh entirely. See [`SPEC.md` § NetBird](./SPEC.md#netbird).
 
 ## CLI cheatsheet
 
