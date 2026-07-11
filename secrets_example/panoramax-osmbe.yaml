@@ -1,0 +1,110 @@
+# Plaintext secrets template. Copy this file into ./secrets/, replace every
+# SET-ME-… value with a real one, then encrypt in place:
+#
+#     sops --encrypt -i secrets/panoramax-osmbe.yaml
+#
+# Subsequently, edit with `sops secrets/panoramax-osmbe.yaml`.
+#
+# Every value below uses a realistic shape (URL format, key armor, etc.) so
+# you can tell what kind of value is expected. The SET-ME-… token appears in
+# every placeholder so a forgotten field is obvious in logs and at runtime.
+#
+# Mirror these key paths in flake.nix → secrets-dummy.yaml when adding new
+# secrets, so a fresh-clone `nix flake check` keeps passing.
+
+panoramax:
+  # Combined env fragment merged into /run/panoramax.env at service start.
+  # Lives as a multi-line scalar (sops encrypts the whole value).
+  env: |
+    # OSM OAuth application Client ID + Secret from
+    # https://www.openstreetmap.org/oauth2/applications
+    OAUTH_CLIENT_ID=SET-ME-osm-oauth-client-id
+    OAUTH_CLIENT_SECRET=SET-ME-osm-oauth-client-secret
+    # Generate with: python3 -c 'import secrets; print(secrets.token_hex())'
+    FLASK_SECRET_KEY=SET-ME-128-hex-chars-from-python-secrets-token-hex
+    PG_PASSWORD=SET-ME-strong-postgres-password
+
+netbird:
+  # NetBird hosted dashboard → Setup keys → New. Auto-enrolment key (UUID).
+  setup-key: SET-ME-XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+
+git:
+  # SSH private key for pushing flake.lock bumps to the public repo (deploy
+  # key with write access). Generated in DEPLOY.md § 1.3 as keys/ssh_deploy_key.
+  # Paste the entire file contents below, including the BEGIN/END markers.
+  # The matching public key goes into the GitHub repo's Deploy keys with
+  # "Allow write access" checked.
+  deploy-key: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    SET-ME-paste-the-entire-contents-of-keys/ssh_deploy_key-here
+    -----END OPENSSH PRIVATE KEY-----
+
+borg:
+  # BorgBackup encryption passphrase. Any strong random string; this is what
+  # `borg create` uses to encrypt the archives client-side.
+  passphrase: SET-ME-strong-random-borg-passphrase-keep-it-long
+  # SSH identity for the BorgBase repo. Generated in DEPLOY.md § 1.5 as
+  # keys/ssh_borg_key. Paste the entire file contents below.
+  ssh-key: |
+    -----BEGIN OPENSSH PRIVATE KEY-----
+    SET-ME-paste-the-entire-contents-of-keys/ssh_borg_key-here
+    -----END OPENSSH PRIVATE KEY-----
+  # Full Borg repo URL from the BorgBase repo page. Format:
+  #   ssh://<user-hash>@<user-hash>.repo.borgbase.com/./repo
+  # Lives in sops on purpose — disclosing the URL narrows an attacker's path.
+  repo-url: ssh://SET-ME-USERHASH@SET-ME-USERHASH.repo.borgbase.com/./repo
+  # SSH host-key line for *.repo.borgbase.com — populates ~/.ssh/known_hosts.
+  # After creating the BorgBase repo you land on a setup page (also at
+  # https://www.borgbase.com/setup) that lists the host keys in RSA, ECDSA,
+  # and ssh-ed25519 flavours. Paste only the **ssh-ed25519** value (the
+  # `AAAA…` part) — our local key is ed25519, so BorgBase will negotiate
+  # over its ed25519 host key. WITHOUT the leading hostname; the
+  # borgbackup module prepends `*.repo.borgbase.com ` automatically.
+  host-key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5SET-ME-borgbase-ed25519-host-key
+
+healthchecks:
+  # All seven check ping URLs. Configure them at https://healthchecks.io as:
+  #   - Simple mode for the 5-minute checks (heartbeat, nfs-health):
+  #     Period 5 min, Grace 10 min.
+  #   - Cron mode for the scheduled checks, matching their OnCalendar timers:
+  #     pgbackrest 15 * * * *, borgbackup 30 1 * * *, pgdump-s3 30 0 * * *,
+  #     flake-update 30 3 * * 0, nixos-upgrade 30 4 * * 0.
+  # See DEPLOY.md § 1.7.
+  heartbeat-url:        https://hc-ping.com/SET-ME-heartbeat-uuid          # 5-min server-alive
+  nfs-health-url:       https://hc-ping.com/SET-ME-nfs-health-uuid         # 5-min stat probe
+  pgbackrest-ping-url:  https://hc-ping.com/SET-ME-pgbackrest-uuid         # hourly + weekly full
+  borgbackup-ping-url:  https://hc-ping.com/SET-ME-borgbackup-uuid         # daily
+  pgdump-s3-ping-url:   https://hc-ping.com/SET-ME-pgdump-s3-uuid          # daily
+  flake-update-url:     https://hc-ping.com/SET-ME-flake-update-uuid       # weekly auto-upgrade lock push
+  nixos-upgrade-url:    https://hc-ping.com/SET-ME-nixos-upgrade-uuid      # weekly auto-upgrade rebuild
+
+s3:
+  # Hetzner Object Storage env-file fragment. Apply lifecycle rules once via
+  # `s3cmd setlifecycle` (see DEPLOY.md § 1.8). Object Lock MUST stay
+  # disabled — it conflicts with tiered retention.
+  env: |
+    AWS_ACCESS_KEY_ID=SET-ME-hetzner-s3-access-key
+    AWS_SECRET_ACCESS_KEY=SET-ME-hetzner-s3-secret-key
+    # Hetzner endpoints look like https://hel1.your-objectstorage.com,
+    # https://fsn1.your-objectstorage.com, etc. Pick the region you used.
+    AWS_ENDPOINT_URL=https://SET-ME-region.your-objectstorage.com
+    S3_BUCKET=panoramax-osmbe-backups
+
+loki:
+  # Grafana Cloud Loki "Send logs" integration: copy URL + User ID + token from
+  # the Grafana Cloud panel. Free-tier defaults are 50 GB/month with 14-day
+  # retention. The exact URL depends on your assigned region; the User ID is a
+  # numeric value and the token is always prefixed `glc_`.
+  push-url: https://logs-prod-SET-ME.grafana.net/loki/api/v1/push
+  push-user: SET-ME-grafana-cloud-loki-user-id
+  push-token: glc_SET-ME-grafana-cloud-loki-push-token
+
+prometheus:
+  # Grafana Cloud Prometheus "Remote Write" integration. The URL is shown in the
+  # Grafana Cloud panel under the Prometheus data source (e.g.
+  # https://prometheus-prod-SET-ME.grafana.net/api/prom/push). The User ID is
+  # numeric and the token is always prefixed `glc_`, separate from the Loki
+  # token. Free-tier defaults are 10,000 active series and 15-day retention.
+  remote-write-url: https://prometheus-prod-SET-ME.grafana.net/api/prom/push
+  remote-write-user: SET-ME-grafana-cloud-prometheus-user-id
+  remote-write-token: glc_SET-ME-grafana-cloud-prometheus-remote-write-token

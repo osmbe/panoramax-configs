@@ -1,0 +1,26 @@
+# Template .sops.yaml. Copy `secrets_example/` to `secrets/`, populate, then
+# encrypt with `sops --encrypt -i secrets/panoramax-osmbe.yaml`.
+#
+# The two recipient lists below define who can decrypt:
+#   - `&admin*` anchors are admin age public keys (one per admin; add more
+#     entries for additional admins).
+#   - `&host_panoramax_osmbe` is the VPS host's age key, derived from its
+#     ed25519 SSH host key via `ssh-to-age`. Pre-generate the host SSH key
+#     locally before running nixos-anywhere; convert with:
+#         ssh-to-age -i keys/ssh_host_ed25519_key.pub
+#
+# Whenever an admin is added/removed, run:
+#     sops updatekeys secrets/panoramax-osmbe.yaml
+keys:
+  - &admin_adminname age1SET-ME-adminname-public-age-key
+  # Add more admins here:
+  # - &admin_other  age1SET-ME-other-admin-age-pubkey
+  - &host_panoramax_osmbe age1SET-ME-converted-from-vps-host-ssh-key
+
+creation_rules:
+  - path_regex: panoramax-osmbe\.yaml$
+    key_groups:
+      - age:
+          - *admin_adminname
+          # - *admin_other
+          - *host_panoramax_osmbe

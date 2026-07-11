@@ -1,0 +1,209 @@
+# Panoramax OSM-BE compose stack.
+#
+# Adapted from upstream `docker/full-osm-auth/docker-compose.yml` in the
+# panoramax/api repository. Project-specific deltas:
+#   - db built from local Dockerfile.db (postgis + pgbackrest)
+#   - db port bound to 127.0.0.1:5432 (localhost-only); admins reach it via
+#     SSH local port forward — see OPERATIONS.md § Connecting to Postgres
+#   - reverseproxy bound to 127.0.0.1:8080 (host Caddy fronts public TLS)
+#   - background-worker has a 2 GB memory limit (workers OOM on huge panos;
+#     Docker auto-restarts them)
+#   - three-path FS mode (FS_URL deliberately empty)
+#   - extra volumes for postgresql.conf and pgbackrest.conf
+
+services:
+  migrations:
+    image: panoramax/api:${GEOVISIO_IMAGE_TAG:-develop}
+    command: db-upgrade
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: postgres://gvs:${PG_PASSWORD}@db/geovisio
+    networks:
+      db: {}
+
+  api:
+    image: panoramax/api:${GEOVISIO_IMAGE_TAG:-develop}
+    # ssl-api is the Waitress WSGI entrypoint despite the name. TLS lives on
+    # Caddy (host); ssl-api just trusts X-Forwarded-Proto from the upstream.
+    command: ssl-api
+    depends_on:
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    environment:
+      OAUTH_PROVIDER: ${OAUTH_PROVIDER}
+      OAUTH_CLIENT_ID: ${OAUTH_CLIENT_ID}
+      OAUTH_CLIENT_SECRET: ${OAUTH_CLIENT_SECRET}
+      DB_URL: postgres://gvs:${PG_PASSWORD}@db/geovisio
+      DB_CHECK_SCHEMA: ${DB_CHECK_SCHEMA}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY}
+      FLASK_SESSION_COOKIE_DOMAIN: ${FLASK_SESSION_COOKIE_DOMAIN}
+      API_FORCE_AUTH_ON_UPLOAD: ${API_FORCE_AUTH_ON_UPLOAD}
+      API_REGISTRATION_IS_OPEN: ${API_REGISTRATION_IS_OPEN}
+      API_ENFORCE_TOS_ACCEPTANCE: ${API_ENFORCE_TOS_ACCEPTANCE}
+      API_PICTURES_LICENSE_SPDX_ID: ${API_PICTURES_LICENSE_SPDX_ID}
+      API_PICTURES_LICENSE_URL: ${API_PICTURES_LICENSE_URL}
+      API_BLUR_URL: ${API_BLUR_URL}
+      API_PERMANENT_PICTURES_PUBLIC_URL: ${API_PERMANENT_PICTURES_PUBLIC_URL}
+      API_DERIVATES_PICTURES_PUBLIC_URL: ${API_DERIVATES_PICTURES_PUBLIC_URL}
+      API_SUMMARY: ${API_SUMMARY}
+      PICTURE_PROCESS_DERIVATES_STRATEGY: ${PICTURE_PROCESS_DERIVATES_STRATEGY}
+      PICTURE_PROCESS_THREADS_LIMIT: ${PICTURE_PROCESS_THREADS_LIMIT}
+      FS_URL: ${FS_URL}
+      FS_TMP_URL: ${FS_TMP_URL}
+      FS_PERMANENT_URL: ${FS_PERMANENT_URL}
+      FS_DERIVATES_URL: ${FS_DERIVATES_URL}
+      INFRA_NB_PROXIES: ${INFRA_NB_PROXIES}
+      NB_API_THREADS: ${NB_API_THREADS}
+    volumes:
+      - tmp_data:/data/tmp
+      - permanent_data:/data/geovisio/permanent
+      - derivates_data:/data/geovisio/derivates
+    healthcheck:
+      test: python -c "import requests; requests.get('http://localhost:5000/api').raise_for_status()"
+      interval: 4s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      db: {}
+      geovisio: {}
+    restart: always
+
+  background-worker:
+    image: panoramax/api:${GEOVISIO_IMAGE_TAG:-develop}
+    command: picture-worker
+    depends_on:
+      db:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    environment:
+      DB_URL: postgres://gvs:${PG_PASSWORD}@db/geovisio
+      DB_CHECK_SCHEMA: ${DB_CHECK_SCHEMA}
+      API_BLUR_URL: ${API_BLUR_URL}
+      PICTURE_PROCESS_DERIVATES_STRATEGY: ${PICTURE_PROCESS_DERIVATES_STRATEGY}
+      PICTURE_PROCESS_THREADS_LIMIT: ${PICTURE_PROCESS_THREADS_LIMIT}
+      FS_URL: ${FS_URL}
+      FS_TMP_URL: ${FS_TMP_URL}
+      FS_PERMANENT_URL: ${FS_PERMANENT_URL}
+      FS_DERIVATES_URL: ${FS_DERIVATES_URL}
+    deploy:
+      mode: replicated
+      replicas: ${PICTURE_WORKERS_REPLICATS:-5}
+      resources:
+        limits:
+          memory: 2G
+    volumes:
+      - tmp_data:/data/tmp
+      - permanent_data:/data/geovisio/permanent
+      - derivates_data:/data/geovisio/derivates
+    networks:
+      db: {}
+    restart: always
+
+  website:
+    image: panoramax/website:${GEOVISIO_WEBSITE_IMAGE_TAG:-develop}
+    environment:
+      VITE_INSTANCE_NAME: ${VITE_INSTANCE_NAME}
+      VITE_API_URL: ${VITE_API_URL}
+      VITE_TILES: ${VITE_TILES}
+      VITE_CENTER: ${VITE_CENTER}
+      VITE_ZOOM: ${VITE_ZOOM}
+      VITE_TITLE: ${VITE_TITLE}
+      VITE_META_TITLE: ${VITE_META_TITLE}
+      VITE_META_DESCRIPTION: ${VITE_META_DESCRIPTION}
+    networks:
+      geovisio: {}
+    restart: always
+
+  reverseproxy:
+    image: nginx:1.30
+    container_name: panoramax-nginx
+    # 127.0.0.1 only — host Caddy fronts public TLS on :80/:443.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - /etc/panoramax/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/panoramax/robots.txt:/etc/nginx/robots.txt:ro
+      - /etc/panoramax/logo.png:/etc/nginx/logo.png:ro
+      - /etc/panoramax/favicon.ico:/etc/nginx/favicon.ico:ro
+      - permanent_data:/data/geovisio/permanent
+      - derivates_data:/data/geovisio/derivates
+    healthcheck:
+      test: ["CMD", "test", "-f", "/var/run/nginx.pid"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      geovisio: {}
+    restart: always
+
+  db:
+    image: panoramax-osmbe/db:local
+    environment:
+      POSTGRES_DB: geovisio
+      POSTGRES_USER: gvs
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+    command: ["postgres", "-D", "/var/lib/postgresql/data", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: pg_isready -h db -q -d $$POSTGRES_DB -U $$POSTGRES_USER
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # Bound to localhost only — never 0.0.0.0. Admin machines reach Postgres
+    # via SSH local port forward (see OPERATIONS.md § Connecting to Postgres);
+    # in-stack containers reach it on the `db` docker network by hostname.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - pgbackrest_data:/var/lib/pgbackrest
+      - /etc/panoramax/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - /etc/panoramax/pgbackrest.conf:/etc/pgbackrest/pgbackrest.conf:ro
+    networks:
+      db: {}
+    restart: always
+
+volumes:
+  postgres_data:
+  # tmp on local disk: keeps the upload-processing queue independent of NFS.
+  # If NFS hiccups, in-flight uploads still finish.
+  tmp_data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: /srv/panoramax/tmp
+  pgbackrest_data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: /srv/panoramax/pgbackrest
+  # Bind mounts onto the two separate NFS child-dataset mounts.
+  # panoramax.service has RequiresMountsFor on both paths, so they are
+  # guaranteed-mounted before docker reaches them.
+  permanent_data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: /srv/panoramax/pictures/permanent
+  derivates_data:
+    driver: local
+    driver_opts:
+      o: bind
+      type: none
+      device: /srv/panoramax/pictures/derivates
+
+networks:
+  db: {}
+  geovisio: {}

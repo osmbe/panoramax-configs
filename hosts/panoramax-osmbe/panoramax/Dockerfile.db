@@ -1,0 +1,14 @@
+# Custom database image: PostGIS + pgBackRest.
+#
+# We add pgBackRest at the OS level (apt) so it can use the same data
+# directory as Postgres for the `archive_command` in postgresql.conf.
+# (Building it as a separate side-car would complicate WAL streaming.)
+#
+# The PostGIS major version is the SINGLE SOURCE OF TRUTH for the database
+# version. Bump per upstream Panoramax release notes; coordinate with a
+# pg_upgrade step.
+FROM postgis/postgis:16-3.4
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pgbackrest \
+    && rm -rf /var/lib/apt/lists/*

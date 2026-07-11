@@ -1,0 +1,27 @@
+# NOTE: `secrets/` is intentionally NOT gitignored. It is registered as a git
+# submodule pointing at the private `panoramax-secrets` repo (see .gitmodules).
+# Submodule semantics protect us from committing inner content into the public
+# repo: only the gitlink SHA is recorded here, never the encrypted-file bytes.
+# The Nix flake source-resolution sees submodule contents (so the real sops
+# file is visible at flake-eval time once the submodule is initialised — not
+# the case for gitignored paths). See spec.md § Secrets for the rationale.
+
+# locally-generated host SSH key, etc.
+keys/
+
+# transient mirror dir built for `nixos-anywhere --extra-files` (DEPLOY § 2.2)
+extra-files/
+
+# build outputs
+result
+result-*
+
+# direnv / editor
+.direnv/
+.vscode/
+
+# stray .env files from local docker-compose runs
+.env
+
+# the cleanroom-handoff folder is kept on the working tree but not tracked
+cleanroom-handoff/
