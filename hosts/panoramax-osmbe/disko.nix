@@ -2,14 +2,15 @@
 {
   # GPT layout for legacy-BIOS boot via GRUB.
   #
-  # Infomaniak VPS disk topology:
-  #   sda — 250 GB data disk. The BIOS boots sda first. NixOS lives here.
-  #   sdb — 20 GB OS disk. Debian ships here; left untouched by NixOS install.
+  # This partitions ONLY the OS volume — whatever disk `instance.diskDevice`
+  # points at, which must be the disk the BIOS boots. Infomaniak VPS Cloud
+  # ships two disks (a ~20 GB OS volume and a ~250 GB data volume) and their
+  # enumeration order is not guaranteed, so confirm with `lsblk` which device
+  # the BIOS boots before setting `diskDevice` — see DEPLOY.md § 2.1.
   #
-  # This naming is stable on fresh Infomaniak Debian images and matches the
-  # kexec installer environment. If lsblk shows sda = 20 GB instead, re-
-  # provision a fresh Debian image from the Infomaniak control panel before
-  # continuing — see DEPLOY.md § 2.1.
+  # The 250 GB data volume is NOT touched here: it is mounted by label in
+  # modules/data-disk.nix so an OS reinstall leaves it intact. See
+  # SPEC.md § Local disk layout.
   disko.devices.disk.main = {
     type = "disk";
     device = instance.diskDevice;

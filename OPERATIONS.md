@@ -313,6 +313,96 @@ $ sudo nixos-rebuild switch --rollback
 
 If the bad upgrade was from auto-upgrade, the bad commit is on `prod` — manually `git reset --hard origin/main` on the VPS, rebuild, then on your PC `git push --force-with-lease origin main:prod` after dealing with the underlying issue.
 
+## Data disk
+
+The 250 GB Infomaniak data volume is mounted at `/srv/panoramax` by the label `pano-data` (xfs caps labels at 12 characters) (see [`modules/data-disk.nix`](./modules/data-disk.nix) and SPEC.md § Local disk layout). It holds the Docker data-root (images + the `postgres_data` volume, i.e. the database), the upload `tmp/` scratch, the local pgBackRest repo, and logs.
+
+### First-time format + migration
+
+Run this once, to move an existing all-on-the-OS-disk install onto the data volume. Everything is a **copy** (`rsync`, not `mv`), so the originals stay put until you've verified the new layout — nothing is destroyed until the final reclaim step. SSH in with `-A` and run as root.
+
+1. **Take a fresh logical backup first**, as insurance:
+
+   ```bash
+   sudo systemctl start panoramax-pgdump-s3.service   # or your usual pg_dump path
+   ```
+
+2. **Identify the data volume.** Do not trust the `sda`/`sdb` letters — confirm by size:
+
+   ```bash
+   lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT
+   ```
+
+   The 250 GB partition (e.g. `sdb2`) is the target. If it holds anything you care about, mount it read-only somewhere and check before continuing — this reformats it.
+
+3. **Stop everything that writes to disk:**
+
+   ```bash
+   sudo systemctl stop panoramax.service          # runs `docker compose down`
+   sudo systemctl stop docker.socket docker.service
+   sudo umount /srv/panoramax/pictures/permanent /srv/panoramax/pictures/derivates
+   ```
+
+4. **Format the data volume with the expected label:**
+
+   ```bash
+   sudo wipefs -a /dev/sdb2                        # clear stale signatures
+   sudo mkfs.xfs -f -L pano-data /dev/sdb2
+   ```
+
+5. **Copy the current local data onto it.** `-H` preserves the hardlinks Docker's overlay store relies on; `-a` preserves ownership so the tmpfiles UIDs (1000/999/1320) stay correct:
+
+   ```bash
+   sudo mount /dev/disk/by-label/pano-data /mnt
+   sudo rsync -aHAX --info=progress2 /srv/panoramax/ /mnt/
+   sudo rsync -aHAX --info=progress2 /var/lib/docker/ /mnt/docker/
+   sudo umount /mnt
+   ```
+
+6. **Deploy the config that mounts it** (this repo, with `data-disk.nix` wired in) and reboot so the mount, the Docker `data-root`, and the NFS remounts all come up cleanly in order:
+
+   ```bash
+   cd /srv/panoramax-configs && git pull && git submodule update --remote secrets
+   sudo nixos-rebuild switch --flake '/srv/panoramax-configs?submodules=1#panoramax-osmbe'
+   sudo reboot
+   ```
+
+7. **Verify** after it comes back:
+
+   ```bash
+   df -h /srv/panoramax                 # ~250 G, not the 16 G root
+   findmnt /srv/panoramax               # source = /dev/…  label pano-data
+   sudo docker volume inspect panoramax_postgres_data
+   panoramax-status                     # containers healthy
+   ```
+
+8. **Reclaim the OS-disk space.** The old copies are still on the OS disk. The old `/var/lib/docker` is plainly visible; the old `/srv/panoramax/*` is now hidden underneath the new mount, so reach it through a bind mount of the root filesystem:
+
+   ```bash
+   sudo rm -rf /var/lib/docker          # docker now uses /srv/panoramax/docker
+
+   sudo mkdir -p /mnt/osroot
+   sudo mount --bind / /mnt/osroot
+   sudo rm -rf /mnt/osroot/srv/panoramax/*   # the shadowed old copy, NOT the live data
+   sudo umount /mnt/osroot
+   sudo rmdir /mnt/osroot
+
+   df -h /                              # root should have plenty free now
+   ```
+
+### Enlarging the data volume later
+
+Infomaniak grows the data volume in-place via an offer change. Afterwards, extend the partition and filesystem online:
+
+```bash
+sudo parted /dev/sdb resizepart 2 100%
+sudo xfs_growfs /srv/panoramax
+```
+
+### On reinstall
+
+`nixos-anywhere` repartitions only the OS disk (disko owns just that), so the data volume survives. As long as it still carries the `pano-data` label, the new system mounts it at `/srv/panoramax` with no extra steps — skip straight to bringing the stack up.
+
 ## Disaster recovery (VPS lost)
 
 The auto-upgrade deploy key and the BorgBase SSH key in sops are **not VPS-tied** — they can stay as-is. Only the host SSH key needs regenerating because it's how sops authenticates the new VPS.

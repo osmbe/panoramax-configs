@@ -10,6 +10,7 @@ in {
     ./hardware-configuration.nix
     ./disko.nix
 
+    ../../modules/data-disk.nix
     ../../modules/common.nix
     ../../modules/users.nix
     ../../modules/ssh.nix

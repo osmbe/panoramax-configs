@@ -47,6 +47,21 @@ Two NFS child-dataset mounts (`/srv/panoramax/pictures/permanent` and `/srv/pano
 
 The VPS `panoramax` user has a fixed UID `1320` so it maps to a matching TrueNAS user for NFS identity-based access without relying on the `Other` ACL mask.
 
+### Local disk layout
+
+Infomaniak VPS Cloud instances ship two block devices: a ~20 GB OS volume and a ~250 GB data volume (their "expand a volume" model treats the data volume as the growable one). NixOS installs onto the OS volume — disko (see [`hosts/panoramax-osmbe/disko.nix`](./hosts/panoramax-osmbe/disko.nix)) partitions whichever disk the BIOS boots — and the 250 GB data volume is mounted at `/srv/panoramax` to hold everything that grows on local disk:
+
+- the Docker data-root (`/srv/panoramax/docker`) — container images plus the `postgres_data` named volume, i.e. the database, which is the single largest local consumer;
+- `tmp/` — the upload-processing scratch area (`FS_TMP_URL`), kept off NFS on purpose (see § Three-path FS mode);
+- `pgbackrest/` — the local pgBackRest repo;
+- `logs/`, and the `pictures/` parent directory that the two NFS child datasets mount under.
+
+Keeping the OS volume small and everything stateful on the data volume matches Infomaniak's own layout: the data volume can be enlarged later (`parted` + `xfs_growfs`) without touching the OS install, and it survives an OS reinstall untouched (see below).
+
+The data volume is mounted **by filesystem label** (`pano-data`, since xfs caps labels at 12 characters), not by `/dev/sdX`. Infomaniak's disk enumeration order is not guaranteed stable, so a device letter can resolve to the wrong disk between boots or reprovisions; a label always follows the correct filesystem. It is also mounted `nofail` (like the NFS mounts) so a missing data volume never hangs boot — `docker.service` and `panoramax.service` both carry `RequiresMountsFor=/srv/panoramax`, so the stack refuses to start rather than silently writing to the OS volume.
+
+The data volume is deliberately **not** managed by disko. disko owns only the OS disk, so a `nixos-anywhere` reinstall repartitions the OS volume while leaving the 250 GB data volume — database, backups, in-flight uploads — intact. The data volume is formatted once by hand (`mkfs.xfs -L pano-data …`); see [`OPERATIONS.md`](./OPERATIONS.md#data-disk).
+
 ### `derivates` vs `derivatives`
 
 Panoramax internally uses the French spelling `derivates` — the env var is `FS_DERIVATES_URL`, the on-disk directory is `derivates/`, and the dataset on TrueNAS is `derivates`. The **public URL** uses the English `/derivatives/`. The compose nginx provides an alias from `/derivatives/` to `/data/geovisio/derivates/` so externally-visible URLs stay English. Don't normalise either spelling.

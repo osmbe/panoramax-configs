@@ -65,9 +65,11 @@
   # Backups
   s3.bucket = "panoramax-osmbe-backups";
 
-  # Disk device for disko. The BIOS boots sda first; NixOS must land here.
-  # On a fresh Infomaniak Debian image sda is always the 250 GB data disk —
-  # confirm with `lsblk` before running nixos-anywhere (see DEPLOY.md § 2.1).
+  # Disk device for disko — the OS volume, i.e. the disk the BIOS boots. NixOS
+  # is installed here; the separate 250 GB data volume is mounted by label in
+  # modules/data-disk.nix. Infomaniak's disk enumeration order is not stable,
+  # so confirm which device the BIOS boots with `lsblk` before running
+  # nixos-anywhere (see DEPLOY.md § 2.1).
   diskDevice = "/dev/sda";
 
   # Where the public repo is checked out on the VPS. Used by the auto-upgrade
