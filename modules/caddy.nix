@@ -10,7 +10,12 @@ let
       Referrer-Policy strict-origin-when-cross-origin
     }
 
-    reverse_proxy 127.0.0.1:8080
+    # Caddy already sets X-Forwarded-For; make X-Real-IP explicit too so it
+    # carries the real client (not the Docker gateway) at every hop. DNS points
+    # straight at the VPS (no CDN), so {remote_host} is the true client.
+    reverse_proxy 127.0.0.1:8080 {
+      header_up X-Real-IP {remote_host}
+    }
   '';
 in
 {
