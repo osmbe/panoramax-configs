@@ -7,7 +7,7 @@
 # The PostGIS major version is the SINGLE SOURCE OF TRUTH for the database
 # version. Bump per upstream Panoramax release notes; coordinate with a
 # pg_upgrade step.
-FROM postgis/postgis:16-3.4
+FROM postgis/postgis:16-3.5
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pgbackrest \

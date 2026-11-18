@@ -433,7 +433,7 @@ PITR via `pgbackrest restore --type=time --target='2026-04-28 12:00:00'`.
 # in a scratch directory
 $ docker run -d --name pgr -p 5433:5432 \
     -e POSTGRES_PASSWORD=test -e POSTGRES_USER=gvs -e POSTGRES_DB=geovisio \
-    postgis/postgis:16-3.4
+    postgis/postgis:16-3.5
 $ s3cmd get s3://panoramax-osmbe-backups/pgdump/daily/<latest>.dump - \
     | docker exec -i pgr pg_restore -U gvs -d geovisio
 $ psql -h localhost -p 5433 -U gvs geovisio -c 'SELECT count(*) FROM sequences;'
@@ -484,7 +484,7 @@ mkdir pgbackrest-repo && tar -xzf pgbackrest-repo.tar.gz -C pgbackrest-repo
 # that the container's postgres user can't always reach.
 sudo chmod -R a+rX pgbackrest-repo/
 
-# Build the same db image the live stack uses (postgis:16-3.4 + pgbackrest)
+# Build the same db image the live stack uses (postgis:16-3.5 + pgbackrest)
 cp /path/to/panoramax-configs/hosts/panoramax-osmbe/panoramax/Dockerfile.db .
 sudo docker build -t panoramax-db-restore -f Dockerfile.db .
 
