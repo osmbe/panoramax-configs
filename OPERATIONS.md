@@ -405,67 +405,74 @@ sudo xfs_growfs /srv/panoramax
 
 ## Migrating the db image across Debian releases
 
-The `db` image comes from `Dockerfile.db`, and PostGIS started shipping the 16-3.6+ images on Debian **trixie** — the 16-3.4/16-3.5 line was bullseye. Changing the base image changes glibc under an existing data directory, and upstream explicitly recommends a logical dump/restore instead of an in-place swap (see postgis/docker-postgis#462). Use this runbook for any future base-image jump (and swap `pg_restore` for `pg_upgrade` when PostgreSQL itself changes major version).
-
-For readability the compose invocation is abbreviated below:
+The `db` image comes from `Dockerfile.db`, and PostGIS ships the 16-3.6+ images on Debian **trixie** (16-3.4/16-3.5 were bullseye). A base-image change swaps glibc under the data directory, so the data moves by logical dump rather than in place (postgis/docker-postgis#462). Same recipe for any future base jump; use `pg_upgrade` instead of `pg_restore` if PostgreSQL itself changes major version. For the current ~7 GB database the window is about half an hour, dominated by dump and restore.
 
 ```bash
 DC="sudo docker compose -f /etc/panoramax/docker-compose.yml --env-file /run/panoramax.env"
 ```
 
-**0. Pre-flight.** Deploy the updated `Dockerfile.db` first (commit → merge to `prod` → on the VPS `git pull --ff-only` → `nixos-rebuild switch`), so `/etc/panoramax/Dockerfile.db` names the new base. Check `df -h /srv/panoramax` — the dump needs roughly the database size.
+**1. Deploy the new `Dockerfile.db`** (commit → merge to `prod` → `git pull --ff-only` → `nixos-rebuild switch`), and check `df -h /srv/panoramax`: the dump plus the new cluster need roughly twice the database size.
 
-**1. Dump while the old image is still running.**
+**2. Dump while the old image still runs.** Note the row counts for step 5.
 
 ```bash
-$DC exec -T db pg_dump -U gvs -Fc geovisio > /srv/panoramax/pre-migration.dump
+$DC exec -T db psql -U gvs -d geovisio -c "select count(*) from pictures;" -c "select count(*) from sequences;"
+sudo bash -c "$DC exec -T db pg_dump -U gvs -Fc geovisio > /srv/panoramax/pre-migration.dump"
 ```
 
-**2. Stop the stack, then build the new image.** From here until step 6 nothing may recreate the db container with the old data directory.
+**3. Stop the stack and build the new image.** Until step 5 nothing may start the db on the old data directory.
 
 ```bash
 sudo systemctl stop panoramax.service
 sudo systemctl restart panoramax-build-db.service
 ```
 
-**3. Move the old cluster aside.** Same filesystem, so this is instant, and it stays as the rollback copy.
+**4. Park the old cluster** — instant, same filesystem, and it stays as the rollback copy:
 
 ```bash
 sudo mv /srv/panoramax/docker/volumes/panoramax_postgres_data/_data{,.pre-migration}
 sudo mkdir -p /srv/panoramax/docker/volumes/panoramax_postgres_data/_data
 ```
 
-**4. Start only the db on the new image and restore into the fresh cluster.** The dump recreates the extensions at the image's default versions and rebuilds every index, which is the whole point of the logical route.
+**5. Start the fresh cluster and restore.**
 
 ```bash
-$DC up -d db
-# wait until `$DC ps` shows db healthy, then:
-$DC exec -T db pg_restore -U gvs -d geovisio --no-owner --no-privileges < /srv/panoramax/pre-migration.dump
+$DC up -d db               # wait until `$DC ps db` shows (healthy)
+sudo bash -c "$DC exec -T db pg_restore -U gvs -d geovisio --no-owner --no-privileges < /srv/panoramax/pre-migration.dump"
 ```
 
-**5. Verify before letting traffic back in.**
+`pg_restore` ending with `errors ignored on restore: 3` is expected: the image's init already created the `tiger`/`topology` schemas (duplicate `CREATE SCHEMA`), and `REFRESH MATERIALIZED VIEW pictures_grid` can trip a spurious type error. Re-run the refresh, then verify counts and extension version:
 
 ```bash
-$DC exec db psql -U gvs -d geovisio \
+$DC exec -T db psql -U gvs -d geovisio \
+  -c "REFRESH MATERIALIZED VIEW public.pictures_grid;" \
   -c "select postgis_full_version();" \
-  -c "select count(*) from pictures;" \
-  -c "select count(*) from sequences;"
+  -c "select count(*) from pictures;" -c "select count(*) from sequences;"
 ```
 
-**6. Start the stack and re-point pgBackRest.** A restored cluster has a **new system identifier**, so the stanza needs `stanza-upgrade` — old backups stay in the repo but belong to the previous cluster.
+**6. Re-point pgBackRest before starting the stack.** The restored cluster has a new system identifier; upgrading the stanza now means the `pgbackrest-stanza-init` unit passes on its first try when the stack starts.
+
+```bash
+$DC exec -u postgres db pgbackrest --stanza=panoramax stanza-upgrade
+```
+
+**7. Start the stack and take a base backup.** The weekly full timer won't fire until Sunday, and PITR needs a backup that belongs to the new cluster.
 
 ```bash
 sudo systemctl start panoramax.service
-$DC exec -u postgres db pgbackrest --stanza=panoramax stanza-upgrade
-sudo systemctl restart pgbackrest-stanza-init.service
-$DC exec db psql -U gvs -d geovisio -c "select archived_count, failed_count from pg_stat_archiver"
+$DC exec -u postgres db pgbackrest --stanza=panoramax --type=full backup
+$DC exec -u postgres db pgbackrest --stanza=panoramax check
 ```
 
-Archiving should resume immediately and `pg_wal` should drain back to its usual size.
+**8. Confirm archiving is flowing.** `archived_count` climbs, `failed_count` stays put, and `pg_wal` settling near `max_wal_size` (4 GB here) is normal — postgres recycles segments instead of deleting them, which shows as `0 removed, N recycled` in the checkpoint log line.
 
-**7. Rollback.** Any time before you delete the old data: stop the stack, swap the directories back (`_data.pre-migration` → `_data`), re-tag the previous image if the tag already moved (`docker images` → find the dangling predecessor → `docker tag <id> panoramax-osmbe/db:local`), then `systemctl start panoramax.service`. The dump also restores into the old image if you prefer that route.
+```bash
+$DC exec -T db psql -U gvs -d geovisio -c "select archived_count, failed_count from pg_stat_archiver;"
+```
 
-**8. Reclaim** once a full backup has completed on the new image: `sudo rm -rf /srv/panoramax/docker/volumes/panoramax_postgres_data/_data.pre-migration`. Keep the dump until then.
+**Rollback** any time before reclaiming: stop the stack, move `_data.pre-migration` back to `_data`, re-tag the previous image if the tag already moved (`docker images` → find the dangling predecessor → `docker tag <id> panoramax-osmbe/db:local`), and `systemctl start panoramax.service`.
+
+**Reclaim** once a full backup has completed on the new image and the instance has run cleanly for a few days: delete `_data.pre-migration` and the dump.
 
 ## Disaster recovery (VPS lost)
 
