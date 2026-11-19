@@ -9,6 +9,15 @@
 # pg_upgrade step.
 FROM postgis/postgis:16-3.5
 
-RUN apt-get update \
+# postgis/postgis images below PostgreSQL 18 are based on Debian bullseye,
+# which is EOL: deb.debian.org no longer serves it and the last published
+# security InRelease has expired, so a plain `apt-get update` fails with
+# exit code 100 (see postgis/docker-postgis#462). Repoint apt at the Debian
+# archive, where bullseye's final state is frozen.
+RUN sed -e '/debian.org/ s/^#*/# /' -i /etc/apt/sources.list \
+    && echo "deb [check-valid-until=no] http://archive.debian.org/debian bullseye main" >> /etc/apt/sources.list \
+    && echo "deb [check-valid-until=no] http://archive.debian.org/debian bullseye-updates main" >> /etc/apt/sources.list \
+    && echo "deb [check-valid-until=no] http://archive.debian.org/debian-security bullseye-security main" >> /etc/apt/sources.list \
+    && apt-get update \
     && apt-get install -y --no-install-recommends pgbackrest \
     && rm -rf /var/lib/apt/lists/*
