@@ -7,21 +7,17 @@
 # The PostGIS major version is the SINGLE SOURCE OF TRUTH for the database
 # version. Bump per upstream Panoramax release notes; coordinate with a
 # pg_upgrade step.
-FROM postgis/postgis:16-3.5
+FROM postgis/postgis:16-3.6
 
-# postgis/postgis images below PostgreSQL 18 are based on Debian bullseye,
-# which is EOL: deb.debian.org no longer serves it and the published
-# Release files have expired, so `apt-get update` exits 100 (see
-# postgis/docker-postgis#462). The image also carries a frozen PGDG repo
-# (sources.list.d/pgdg.list) whose metadata is expired too. Drop all of
-# the image's apt sources and point apt at the Debian archive, where
-# bullseye's final state is frozen; Check-Valid-Until is disabled because
-# those archived Release files are past their expiry.
-RUN rm -rf /etc/apt/sources.list.d/* /etc/apt/sources.list \
-    && echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99-archive \
-    && echo "deb http://archive.debian.org/debian bullseye main" > /etc/apt/sources.list \
-    && echo "deb http://archive.debian.org/debian bullseye-updates main" >> /etc/apt/sources.list \
-    && echo "deb http://archive.debian.org/debian-security bullseye-security main" >> /etc/apt/sources.list \
-    && apt-get update \
+# The 16-3.6 images moved to Debian trixie, whose pgbackrest (2.55.x)
+# understands PostgreSQL 16 and the repo1-block/repo1-bundle options in
+# pgbackrest.conf. The older 16-3.4/16-3.5 images were Debian bullseye,
+# which is EOL and can no longer provide a PG16-capable pgbackrest —
+# Debian's last bullseye build (2.33) predates PG16 and PGDG dropped the
+# bullseye dist (postgis/docker-postgis#462). Moving bases changes glibc
+# under the data directory, so this image needs a dump/restore migration,
+# not a drop-in swap: see OPERATIONS.md § Migrating the db image across
+# Debian releases.
+RUN apt-get update \
     && apt-get install -y --no-install-recommends pgbackrest \
     && rm -rf /var/lib/apt/lists/*

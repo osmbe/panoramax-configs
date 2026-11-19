@@ -403,6 +403,70 @@ sudo xfs_growfs /srv/panoramax
 
 `nixos-anywhere` repartitions only the OS disk (disko owns just that), so the data volume survives. As long as it still carries the `pano-data` label, the new system mounts it at `/srv/panoramax` with no extra steps — skip straight to bringing the stack up.
 
+## Migrating the db image across Debian releases
+
+The `db` image comes from `Dockerfile.db`, and PostGIS started shipping the 16-3.6+ images on Debian **trixie** — the 16-3.4/16-3.5 line was bullseye. Changing the base image changes glibc under an existing data directory, and upstream explicitly recommends a logical dump/restore instead of an in-place swap (see postgis/docker-postgis#462). Use this runbook for any future base-image jump (and swap `pg_restore` for `pg_upgrade` when PostgreSQL itself changes major version).
+
+For readability the compose invocation is abbreviated below:
+
+```bash
+DC="sudo docker compose -f /etc/panoramax/docker-compose.yml --env-file /run/panoramax.env"
+```
+
+**0. Pre-flight.** Deploy the updated `Dockerfile.db` first (commit → merge to `prod` → on the VPS `git pull --ff-only` → `nixos-rebuild switch`), so `/etc/panoramax/Dockerfile.db` names the new base. Check `df -h /srv/panoramax` — the dump needs roughly the database size.
+
+**1. Dump while the old image is still running.**
+
+```bash
+$DC exec -T db pg_dump -U gvs -Fc geovisio > /srv/panoramax/pre-migration.dump
+```
+
+**2. Stop the stack, then build the new image.** From here until step 6 nothing may recreate the db container with the old data directory.
+
+```bash
+sudo systemctl stop panoramax.service
+sudo systemctl restart panoramax-build-db.service
+```
+
+**3. Move the old cluster aside.** Same filesystem, so this is instant, and it stays as the rollback copy.
+
+```bash
+sudo mv /srv/panoramax/docker/volumes/panoramax_postgres_data/_data{,.pre-migration}
+sudo mkdir -p /srv/panoramax/docker/volumes/panoramax_postgres_data/_data
+```
+
+**4. Start only the db on the new image and restore into the fresh cluster.** The dump recreates the extensions at the image's default versions and rebuilds every index, which is the whole point of the logical route.
+
+```bash
+$DC up -d db
+# wait until `$DC ps` shows db healthy, then:
+$DC exec -T db pg_restore -U gvs -d geovisio --no-owner --no-privileges < /srv/panoramax/pre-migration.dump
+```
+
+**5. Verify before letting traffic back in.**
+
+```bash
+$DC exec db psql -U gvs -d geovisio \
+  -c "select postgis_full_version();" \
+  -c "select count(*) from pictures;" \
+  -c "select count(*) from sequences;"
+```
+
+**6. Start the stack and re-point pgBackRest.** A restored cluster has a **new system identifier**, so the stanza needs `stanza-upgrade` — old backups stay in the repo but belong to the previous cluster.
+
+```bash
+sudo systemctl start panoramax.service
+$DC exec -u postgres db pgbackrest --stanza=panoramax stanza-upgrade
+sudo systemctl restart pgbackrest-stanza-init.service
+$DC exec db psql -U gvs -d geovisio -c "select archived_count, failed_count from pg_stat_archiver"
+```
+
+Archiving should resume immediately and `pg_wal` should drain back to its usual size.
+
+**7. Rollback.** Any time before you delete the old data: stop the stack, swap the directories back (`_data.pre-migration` → `_data`), re-tag the previous image if the tag already moved (`docker images` → find the dangling predecessor → `docker tag <id> panoramax-osmbe/db:local`), then `systemctl start panoramax.service`. The dump also restores into the old image if you prefer that route.
+
+**8. Reclaim** once a full backup has completed on the new image: `sudo rm -rf /srv/panoramax/docker/volumes/panoramax_postgres_data/_data.pre-migration`. Keep the dump until then.
+
 ## Disaster recovery (VPS lost)
 
 The auto-upgrade deploy key and the BorgBase SSH key in sops are **not VPS-tied** — they can stay as-is. Only the host SSH key needs regenerating because it's how sops authenticates the new VPS.
@@ -433,7 +497,7 @@ PITR via `pgbackrest restore --type=time --target='2026-04-28 12:00:00'`.
 # in a scratch directory
 $ docker run -d --name pgr -p 5433:5432 \
     -e POSTGRES_PASSWORD=test -e POSTGRES_USER=gvs -e POSTGRES_DB=geovisio \
-    postgis/postgis:16-3.5
+    postgis/postgis:16-3.6
 $ s3cmd get s3://panoramax-osmbe-backups/pgdump/daily/<latest>.dump - \
     | docker exec -i pgr pg_restore -U gvs -d geovisio
 $ psql -h localhost -p 5433 -U gvs geovisio -c 'SELECT count(*) FROM sequences;'
@@ -484,7 +548,7 @@ mkdir pgbackrest-repo && tar -xzf pgbackrest-repo.tar.gz -C pgbackrest-repo
 # that the container's postgres user can't always reach.
 sudo chmod -R a+rX pgbackrest-repo/
 
-# Build the same db image the live stack uses (postgis:16-3.5 + pgbackrest)
+# Build the same db image the live stack uses (postgis:16-3.6 + pgbackrest)
 cp /path/to/panoramax-configs/hosts/panoramax-osmbe/panoramax/Dockerfile.db .
 sudo docker build -t panoramax-db-restore -f Dockerfile.db .
 
