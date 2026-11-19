@@ -117,12 +117,23 @@ in {
           "Build local panoramax-osmbe/db image (postgis + pgbackrest)";
         before = [ "panoramax.service" ];
         requiredBy = [ "panoramax.service" ];
-        after = [ "docker.service" ];
+        # BuildKit resolves the base-image tag against registry-1.docker.io
+        # even when every layer is cached, so the build needs DNS. Without
+        # this it races the network on boot (observed: "lookup
+        # registry-1.docker.io: no such host" 16s after a reboot) and takes
+        # panoramax.service down with it; the restart covers what
+        # network-online.target does not guarantee.
+        after = [ "docker.service" "network-online.target" ];
         requires = [ "docker.service" ];
+        wants = [ "network-online.target" ];
         path = [ pkgs.docker ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
+          Restart = "on-failure";
+          RestartSec = "15s";
+          StartLimitIntervalSec = "10min";
+          StartLimitBurst = 10;
           WorkingDirectory = "/etc/panoramax";
         };
         script = ''

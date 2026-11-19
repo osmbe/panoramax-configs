@@ -40,14 +40,20 @@
   };
 
   # Helper used by other units that need the wt0 interface up before they can
-  # bind / connect. Polls every second up to a minute.
+  # bind / connect. Polls every second up to three minutes, then retries: a
+  # slow NetBird handshake at boot (observed >60s after a reboot) should not
+  # take the whole stack down with it.
   systemd.services.wait-for-wt0 = {
     description = "Wait for NetBird interface ${instance.netbird.interface} to have an IPv4";
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = "15s";
+      StartLimitIntervalSec = "10min";
+      StartLimitBurst = 10;
       ExecStart = pkgs.writeShellScript "wait-for-wt0" ''
-        for i in $(seq 1 60); do
+        for i in $(seq 1 180); do
           if ${pkgs.iproute2}/bin/ip -4 addr show ${instance.netbird.interface} 2>/dev/null \
               | ${pkgs.gnugrep}/bin/grep -q 'inet '; then
             exit 0
