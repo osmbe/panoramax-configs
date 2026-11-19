@@ -126,7 +126,7 @@ in {
         after = [ "docker.service" "network-online.target" ];
         requires = [ "docker.service" ];
         wants = [ "network-online.target" ];
-        path = [ pkgs.docker ];
+        path = [ pkgs.docker pkgs.glibc.bin ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
@@ -139,6 +139,15 @@ in {
         script = ''
           tmp=$(mktemp -d)
           cp -L /etc/panoramax/Dockerfile.db "$tmp/Dockerfile.db"
+          # BuildKit resolves the base-image tag against registry-1.docker.io
+          # even when every layer is cached, so wait for DNS first. On boot
+          # this unit can otherwise run before the network is up, fail, and
+          # take panoramax.service with it — a dependency failure is not
+          # retried by Restart=.
+          for i in $(seq 1 90); do
+            getent hosts registry-1.docker.io >/dev/null 2>&1 && break
+            sleep 2
+          done
           docker build --network host -t panoramax-osmbe/db:local -f "$tmp/Dockerfile.db" "$tmp"
           rm -rf "$tmp"
         '';
@@ -158,8 +167,12 @@ in {
         requires = [
           "docker.service"
           "panoramax-env-merge.service"
-          "panoramax-build-db.service"
         ];
+        # build-db is `wants`, not `requires`: if the image build fails, the
+        # existing db:local tag is still perfectly usable, and a dependency
+        # failure here would otherwise leave the whole stack down with no
+        # retry (observed on boot 2026-11-19: DNS raced the build).
+        wants = [ "panoramax-build-db.service" ];
         # Refuse to start the stack until both NFS child-dataset mounts are
         # actually up (avoids an empty bind mount that Docker would gladly use).
         unitConfig.RequiresMountsFor =
